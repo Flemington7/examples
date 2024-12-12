@@ -103,6 +103,43 @@ class PositionalEncoding(nn.Module):
 
         x = x + self.pe[:x.size(0), :]
         return self.dropout(x)
+    
+class PositionalEncoding2d(nn.Module):
+    # max height / max width
+    def __init__(self, d_model, dropout=0.1, height=128, width=128) -> None:
+        super().__init__()
+        if d_model % 4 != 0:
+            raise ValueError("Cannot use sin/cos positional encoding with "
+                            "odd dimension (got dim={:d})".format(d_model))
+        pe = torch.zeros(d_model, height, width)
+        # Each dimension use half of d_model
+        d_model = int(d_model / 2)
+        div_term = torch.exp(torch.arange(0., d_model, 2) *
+                            -(math.log(10000.0) / d_model))
+        pos_w = torch.arange(0., width).unsqueeze(1)
+        pos_h = torch.arange(0., height).unsqueeze(1)
+        pe[0:d_model:2, :, :] = torch.sin(pos_w * div_term).transpose(0, 1).unsqueeze(1).repeat(1, height, 1)
+        pe[1:d_model:2, :, :] = torch.cos(pos_w * div_term).transpose(0, 1).unsqueeze(1).repeat(1, height, 1)
+        pe[d_model::2, :, :] = torch.sin(pos_h * div_term).transpose(0, 1).unsqueeze(2).repeat(1, 1, width)
+        pe[d_model + 1::2, :, :] = torch.cos(pos_h * div_term).transpose(0, 1).unsqueeze(2).repeat(1, 1, width)
+        self.register_buffer('pe', pe)
+        self.dropout = nn.Dropout(p=dropout)
+
+    def forward(self, x):
+        # pe_1d.shape max_len, 1, tok_emb
+        # x.shape  bptt,batch,tok_emb
+        # pe_2d.shape tok_emb,max_height,max_width
+        w = 4
+        h = x.size(0) // w
+        odd = x.size(0) - h * w
+        # w = h = int(math.sqrt(x.size(0)))
+        pe1 = self.pe[:, :h, :w].reshape(x.size(-1), -1) # shape: tok_emb, bptt
+        pe2 = self.pe[:, h, :odd].reshape(x.size(-1), -1) # shape: tok_emb, bptt
+        pe = torch.cat([pe1, pe2], 1)
+        pe = pe.transpose(0, 1).unsqueeze(1) # shape: bptt, 1, tok_emb
+        x = x + pe
+        return self.dropout(x)
+        
 
 class TransformerModel(nn.Transformer):
     """Container module with an encoder, a recurrent or transformer module, and a decoder."""
@@ -111,7 +148,7 @@ class TransformerModel(nn.Transformer):
         super(TransformerModel, self).__init__(d_model=ninp, nhead=nhead, dim_feedforward=nhid, num_encoder_layers=nlayers)
         self.model_type = 'Transformer'
         self.src_mask = None
-        self.pos_encoder = PositionalEncoding(ninp, dropout)
+        self.pos_encoder = PositionalEncoding2d(ninp, dropout)
 
         self.input_emb = nn.Embedding(ntoken, ninp)
         self.ninp = ninp
@@ -138,6 +175,7 @@ class TransformerModel(nn.Transformer):
             self.src_mask = None
 
         src = self.input_emb(src) * math.sqrt(self.ninp)
+        # src = src.repeat(height)
         src = self.pos_encoder(src)
         output = self.encoder(src, mask=self.src_mask)
         output = self.decoder(output)
