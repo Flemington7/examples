@@ -10,7 +10,7 @@ python main.py --cuda --tied               # Train a tied LSTM on Wikitext-2 wit
 python main.py --cuda --epochs 6 --model Transformer --lr 5
                                            # Train a Transformer model on Wikitext-2 with CUDA.
 
-python generate.py                         # Generate samples from the default model checkpoint.
+python generate.py --cuda                  # Generate samples from the default model checkpoint with CUDA.
 ```
 
 The model uses the `nn.RNN` module (and its sister modules `nn.GRU` and `nn.LSTM`) or Transformer module (`nn.TransformerEncoder` and `nn.TransformerEncoderLayer`) which will automatically use the cuDNN backend if run on CUDA with cuDNN installed.
