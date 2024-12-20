@@ -83,11 +83,11 @@ class PositionalEncoding(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
         pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)  # Shape: max_len, 1
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))  # Shape: d_model/2
+        pe[:, 0::2] = torch.sin(position * div_term)  # Shape: max_len, d_model/2
         pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0).transpose(0, 1)
+        pe = pe.unsqueeze(0).transpose(0, 1)  # Shape: max_len, 1, d_model
         self.register_buffer('pe', pe)
 
     def forward(self, x):
@@ -103,7 +103,102 @@ class PositionalEncoding(nn.Module):
 
         x = x + self.pe[:x.size(0), :]
         return self.dropout(x)
+
+class SpiralPositionalEncoding(nn.Module):
+    """
+    Positional Encoding tailored for a spiral sequence.
+    Encodes the 2D grid position (row, column) into embeddings compatible with the transformer.
+    """
+    def __init__(self, d_model, height, width, dropout=0.1):
+        """
+        Args:
+            d_model: Dimensionality of the embeddings.
+            height: Height of the 2D grid.
+            width: Width of the 2D grid.
+            dropout: Dropout rate.
+        """
+        super(SpiralPositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        # Compute positional encodings for the entire grid
+        pe = torch.zeros(height * width, d_model)  # Flattened grid positions, shape: (seq_len, embed_dim)
+        y_coords, x_coords = torch.meshgrid(torch.arange(height), torch.arange(width), indexing='ij')
+
+        # Spiral order index mapping
+        coords = torch.stack([y_coords.flatten(), x_coords.flatten()], dim=1)  # Shape: (height*width, 2)
+        spiral_idx = self._spiral_indices(height, width)  # Get spiral order indices
+        spiral_coords = coords[spiral_idx]  # Rearrange in spiral order, shape: (height*width, 2)
+
+        # Encode 2D coordinates into d_model dimensions using parallel operations
+        y = spiral_coords[:, 0].float().unsqueeze(1)  # Shape: (seq_len, 1)
+        x = spiral_coords[:, 1].float().unsqueeze(1)  # Shape: (seq_len, 1)
+
+        # Calculate the div_terms for sine and cosine functions
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))  # Shape: (d_model/2,)
+
+        # Compute positional encodings for each position in the spiral sequence
+        pe[:, 0::2] = torch.sin(y * div_term)  # Shape: (seq_len, d_model/2)
+        pe[:, 1::2] = torch.cos(x * div_term)  # Shape: (seq_len, d_model/2)
+
+        self.register_buffer('pe', pe.unsqueeze(1))  # Shape: (seq_len, 1, d_model)
+
+    def forward(self, x):
+        r"""Add spiral positional encodings to the input embeddings.
+        Args:
+            x: the sequence fed to the positional encoder model (required).
+        Shape:
+            x: [sequence length, batch size, embed dim]
+            output: [sequence length, batch size, embed dim]
+        Examples:
+            >>> output = pos_encoder(x)
+        """
+
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)
     
+    def _spiral_indices(self, height, width):
+        """
+        Generate spiral order indices for a 2D grid of size height x width.
+        Args:
+            height: Height of the grid.
+            width: Width of the grid.
+        Returns:
+            torch.Tensor: A tensor of indices representing spiral order, shape: (height*width,)
+        Examples:
+            >>> spiral_idx = self._spiral_indices(3, 3)
+            tensor([4, 3, 6, 7, 8, 5, 2, 1, 0])
+        """
+        grid = torch.arange(height * width).reshape(height, width)
+        spiral_idx = []
+
+        while grid.numel() > 0:
+            # Top row
+            spiral_idx.extend(grid[0, :].tolist())
+            grid = grid[1:, :]  # Remove top row
+            if grid.numel() == 0:
+                break
+
+            # Right column
+            spiral_idx.extend(grid[:, -1].tolist())
+            grid = grid[:, :-1]  # Remove right column
+            if grid.numel() == 0:
+                break
+
+            # Bottom row (reversed)
+            spiral_idx.extend(grid[-1, :].flip(0).tolist())
+            grid = grid[:-1, :]  # Remove bottom row
+            if grid.numel() == 0:
+                break
+
+            # Left column (reversed)
+            spiral_idx.extend(grid[:, 0].flip(0).tolist())
+            grid = grid[:, 1:]  # Remove left column
+
+        # Reverse the spiral order to match the spiral order of the grid
+        spiral_idx.reverse()
+
+        return torch.tensor(spiral_idx, dtype=torch.long)
+
 class PositionalEncoding2d(nn.Module):
     # max height / max width
     def __init__(self, d_model, dropout=0.1, height=128, width=128) -> None:
@@ -139,16 +234,25 @@ class PositionalEncoding2d(nn.Module):
         pe = pe.transpose(0, 1).unsqueeze(1) # shape: bptt, 1, tok_emb
         x = x + pe
         return self.dropout(x)
-        
 
 class TransformerModel(nn.Transformer):
-    """Container module with an encoder, a recurrent or transformer module, and a decoder."""
+    """
+    Container module with an encoder, a recurrent or transformer module, and a decoder.
+    Args:
+        ntoken: Number of tokens in the vocabulary.
+        ninp: Number of expected features in the input.
+        nhead: Number of heads in the multiheadattention models.
+        nhid: Dimension of the feedforward network model.
+        nlayers: Number of recurrent layers.
+        dropout: A dropout value of [0, 1).
+    """
 
-    def __init__(self, ntoken, ninp, nhead, nhid, nlayers, dropout=0.5):
+    def __init__(self, ntoken, ninp, nhead, nhid, nlayers, height=128, width=128, dropout=0.5):
         super(TransformerModel, self).__init__(d_model=ninp, nhead=nhead, dim_feedforward=nhid, num_encoder_layers=nlayers)
         self.model_type = 'Transformer'
         self.src_mask = None
-        self.pos_encoder = PositionalEncoding2d(ninp, dropout)
+        # self.pos_encoder = PositionalEncoding(ninp, dropout)
+        self.pos_encoder = SpiralPositionalEncoding(ninp, height=height, width=width, dropout=dropout)
 
         self.input_emb = nn.Embedding(ntoken, ninp)
         self.ninp = ninp
@@ -166,6 +270,13 @@ class TransformerModel(nn.Transformer):
         nn.init.uniform_(self.decoder.weight, -initrange, initrange)
 
     def forward(self, src, has_mask=True):
+        """Performs the forward pass of the Transformer model.
+        Args:
+            src (Tensor): The input sequence tensor of shape [sequence length, batch size].
+            has_mask (bool): Indicates whether to apply a source mask. Default is True.
+        Returns:
+            Tensor: Log probabilities of the output tokens.
+        """
         if has_mask:
             device = src.device
             if self.src_mask is None or self.src_mask.size(0) != len(src):
@@ -174,9 +285,9 @@ class TransformerModel(nn.Transformer):
         else:
             self.src_mask = None
 
-        src = self.input_emb(src) * math.sqrt(self.ninp)
+        src = self.input_emb(src) * math.sqrt(self.ninp) # Shape: (seq_len, batch, embed_dim)
         # src = src.repeat(height)
-        src = self.pos_encoder(src)
+        src = self.pos_encoder(src) # Add positional encoding to the input embeddings
         output = self.encoder(src, mask=self.src_mask)
         output = self.decoder(output)
         return F.log_softmax(output, dim=-1)

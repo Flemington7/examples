@@ -13,6 +13,10 @@ import model
 parser = argparse.ArgumentParser(description='PyTorch Wikitext-2 RNN/LSTM/GRU/Transformer Language Model')
 parser.add_argument('--data', type=str, default='./data/wikitext-2',
                     help='location of the data corpus')
+parser.add_argument('--height', type=int, default=20,
+                    help='height of the 2D grid')
+parser.add_argument('--width', type=int, default=4,
+                    help='width of the 2D grid')
 parser.add_argument('--model', type=str, default='LSTM',
                     help='type of network (RNN_TANH, RNN_RELU, LSTM, GRU, Transformer)')
 parser.add_argument('--emsize', type=int, default=200,
@@ -71,10 +75,27 @@ else:
     device = torch.device("cpu")
 
 ###############################################################################
+# Generate the spiral grid
+###############################################################################
+num_train_samples = 1
+num_valid_samples = 1
+num_test_samples = 1
+
+# Generate datasets
+train_grids = data.generate_patterned_grids(args.height, args.width, num_train_samples)
+valid_grids = data.generate_patterned_grids(args.height, args.width, num_valid_samples)
+test_grids = data.generate_patterned_grids(args.height, args.width, num_test_samples)
+
+# Save datasets to files
+data.save_grids(os.path.join(args.data, 'train.txt'), train_grids)
+data.save_grids(os.path.join(args.data, 'valid.txt'), valid_grids)
+data.save_grids(os.path.join(args.data, 'test.txt'), test_grids)
+
+###############################################################################
 # Load data
 ###############################################################################
 
-corpus = data.Corpus(args.data)
+corpus = data.Corpus(args.data, args.height, args.width)
 
 # Starting from sequential data, batchify arranges the dataset into columns.
 # For instance, with the alphabet as the sequence and batch size 4, we'd get
@@ -97,7 +118,7 @@ def batchify(data, bsz):
     data = data.view(bsz, -1).t().contiguous()
     return data.to(device)
 
-eval_batch_size = 4 # 10
+eval_batch_size = 1
 train_data = batchify(corpus.train, args.batch_size)
 val_data = batchify(corpus.valid, eval_batch_size)
 test_data = batchify(corpus.test, eval_batch_size)
@@ -108,7 +129,7 @@ test_data = batchify(corpus.test, eval_batch_size)
 
 ntokens = len(corpus.dictionary)
 if args.model == 'Transformer':
-    model = model.TransformerModel(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device)
+    model = model.TransformerModel(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.height, args.width, args.dropout).to(device)
 else:
     model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied).to(device)
 
@@ -138,8 +159,18 @@ def repackage_hidden(h):
 # to the seq_len dimension in the LSTM.
 
 def get_batch(source, i):
+    """
+    The source data is divided into smaller subsequences of fixed length args.bptt.
+    This prevents the model from backpropagating too far in time, which can lead to vanishing gradients.
+    Args:
+        source: the batched token sequence
+        i: the index of the token to be processed
+    Returns:
+        data: the input token
+        target: the target token
+    """
     seq_len = min(args.bptt, len(source) - 1 - i)
-    data = source[i:i+seq_len]
+    data = source[i:i+seq_len] # Shape: seq_len, batch_size
     target = source[i+1:i+1+seq_len].view(-1)
     return data, target
 
@@ -183,7 +214,7 @@ def train():
         else:
             hidden = repackage_hidden(hidden)
             output, hidden = model(data, hidden)
-        loss = criterion(output, targets)
+        loss = criterion(output, targets) # Compute the loss using the next token
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
@@ -243,7 +274,7 @@ except KeyboardInterrupt:
 
 # Load the best saved model.
 with open(args.save, 'rb') as f:
-    model = torch.load(f)
+    model = torch.load(f, weights_only=False)
     # after load the rnn params are not a continuous chunk of memory
     # this makes them a continuous chunk, and will speed up forward pass
     # Currently, only rnn model supports flatten_parameters function.
