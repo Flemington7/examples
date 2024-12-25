@@ -13,9 +13,11 @@ import model
 parser = argparse.ArgumentParser(description='PyTorch Wikitext-2 RNN/LSTM/GRU/Transformer Language Model')
 parser.add_argument('--data', type=str, default='./data/wikitext-2',
                     help='location of the data corpus')
+parser.add_argument('--generate_data', type=bool, default=False,
+                    help='generate data')
 parser.add_argument('--height', type=int, default=20,
                     help='height of the 2D grid')
-parser.add_argument('--width', type=int, default=4,
+parser.add_argument('--width', type=int, default=20,
                     help='width of the 2D grid')
 parser.add_argument('--model', type=str, default='LSTM',
                     help='type of network (RNN_TANH, RNN_RELU, LSTM, GRU, Transformer)')
@@ -77,19 +79,20 @@ else:
 ###############################################################################
 # Generate the spiral grid
 ###############################################################################
-num_train_samples = 1
-num_valid_samples = 1
-num_test_samples = 1
+if not os.path.exists(args.data) or args.generate_data:
+    num_train_samples = 1
+    num_valid_samples = 1
+    num_test_samples = 1
 
-# Generate datasets
-train_grids = data.generate_patterned_grids(args.height, args.width, num_train_samples)
-valid_grids = data.generate_patterned_grids(args.height, args.width, num_valid_samples)
-test_grids = data.generate_patterned_grids(args.height, args.width, num_test_samples)
+    # Generate datasets
+    train_grids = data.generate_patterned_grids(args.height, args.width, num_train_samples)
+    valid_grids = data.generate_patterned_grids(args.height, args.width, num_valid_samples)
+    test_grids = data.generate_patterned_grids(args.height, args.width, num_test_samples)
 
-# Save datasets to files
-data.save_grids(os.path.join(args.data, 'train.txt'), train_grids)
-data.save_grids(os.path.join(args.data, 'valid.txt'), valid_grids)
-data.save_grids(os.path.join(args.data, 'test.txt'), test_grids)
+    # Save datasets to files
+    data.save_grids(os.path.join(args.data, 'train.txt'), train_grids)
+    data.save_grids(os.path.join(args.data, 'valid.txt'), valid_grids)
+    data.save_grids(os.path.join(args.data, 'test.txt'), test_grids)
 
 ###############################################################################
 # Load data
@@ -186,7 +189,7 @@ def evaluate(data_source):
         for i in range(0, data_source.size(0) - 1, args.bptt):
             data, targets = get_batch(data_source, i)
             if args.model == 'Transformer':
-                output = model(data)
+                output = model(data)            
                 output = output.view(-1, ntokens)
             else:
                 output, hidden = model(data, hidden)
