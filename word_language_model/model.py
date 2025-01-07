@@ -107,7 +107,7 @@ class PositionalEncoding(nn.Module):
 
 class SpiralPositionalEncoding(nn.Module):
     """
-    Positional Encoding tailored for a spiral sequence.
+    Positional Encoding tailored for a spiral sequence which is generated from a 2D grid.
     Encodes the 2D grid position (row, column) into embeddings compatible with the transformer.
     """
     def __init__(self, d_model, height, width, dropout=0.1):
