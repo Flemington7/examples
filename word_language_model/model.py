@@ -130,13 +130,19 @@ class SpiralPositionalEncoding(nn.Module):
         spiral_idx = self._spiral_indices(height, width)  # Get spiral order indices
         spiral_coords = coords[spiral_idx]  # Rearrange in spiral order, shape: (height*width, 2)
 
+        # Method 1:
+        # number_of_positions = height * width
+        # position = torch.arange(0, number_of_positions, dtype=torch.float).unsqueeze(1)
+
+        # pe[:, 0::2] = torch.sin(position * div_term)  # Shape: (seq_len, d_model/2)
+        # pe[:, 1::2] = torch.cos(position * div_term)
+
+        # Method 2:
         # Encode 2D coordinates into d_model dimensions using parallel operations
         y = spiral_coords[:, 0].float().unsqueeze(1)  # Shape: (seq_len, 1), a.k.a. (height*width, 1)
         x = spiral_coords[:, 1].float().unsqueeze(1)  # Shape: (seq_len, 1)
 
-        number_of_positions = height * width
-        position = torch.arange(0, number_of_positions, dtype=torch.float).unsqueeze(1)
-
+        # Method 2.1:
         # # Calculate the div_terms for sine and cosine functions
         # div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))  # Shape: (d_model/2,)
 
@@ -144,6 +150,7 @@ class SpiralPositionalEncoding(nn.Module):
         # pe[:, 0::2] = torch.sin(y * div_term)  # Shape: (seq_len, d_model/2)
         # pe[:, 1::2] = torch.cos(x * div_term)  # Shape: (seq_len, d_model/2)
 
+        # Method 2.2:
         # Calculate the div_terms for sine and cosine functions
         div_term = torch.exp(torch.arange(0, d_model, 4).float() * (-math.log(10000.0) / d_model))  # Shape: (d_model/4,)
 
@@ -153,12 +160,11 @@ class SpiralPositionalEncoding(nn.Module):
         pe[:, 2::4] = torch.sin(x * div_term)  # Shape: (seq_len, d_model/4)
         pe[:, 3::4] = torch.cos(x * div_term)  # Shape: (seq_len, d_model/4)
 
-        # pe[:, 0::2] = torch.sin(position * div_term)  # Shape: (seq_len, d_model/2)
-        # pe[:, 1::2] = torch.cos(position * div_term)
-
         self.register_buffer('pe', pe.unsqueeze(1))  # Shape: (seq_len, 1, d_model)
 
-        # self.positional_encoding = nn.Embedding(height * width, d_model) # learnable positional encodings
+        # Method 3:
+        # learnable positional encodings
+        # self.lpe = nn.Embedding(height * width, d_model)
 
     def forward(self, x):
         r"""Add spiral positional encodings to the input embeddings.
@@ -171,8 +177,8 @@ class SpiralPositionalEncoding(nn.Module):
             >>> output = pos_encoder(x)
         """
 
-        # x = x + self.positional_encoding(torch.arange(x.size(0)).to(x.device)).unsqueeze(1)
         x = x + self.pe[:x.size(0), :]
+        # x = x + self.lpe(torch.arange(x.size(0)).to(x.device)).unsqueeze(1)
         return self.dropout(x)
     
     def _spiral_indices(self, height, width):
