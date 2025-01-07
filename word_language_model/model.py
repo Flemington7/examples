@@ -66,6 +66,7 @@ class PositionalEncoding(nn.Module):
     r"""Inject some information about the relative or absolute position of the tokens in the sequence.
         The positional encodings have the same dimension as the embeddings, so that the two can be summed.
         Here, we use sine and cosine functions of different frequencies.
+        Unlike using nn.Embedding that can learn positional encoding during training, this is a fixed positional encoding.
     .. math:
         \text{PosEncoder}(pos, 2i) = sin(pos/10000^(2i/d_model))
         \text{PosEncoder}(pos, 2i+1) = cos(pos/10000^(2i/d_model))
@@ -85,7 +86,7 @@ class PositionalEncoding(nn.Module):
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)  # Shape: max_len, 1
         div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))  # Shape: d_model/2
-        pe[:, 0::2] = torch.sin(position * div_term)  # Shape: max_len, d_model/2
+        pe[:, 0::2] = torch.sin(position * div_term)  # boardcast div_term to position, Shape: max_len, d_model/2
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0).transpose(0, 1)  # Shape: max_len, 1, d_model
         self.register_buffer('pe', pe)
@@ -130,17 +131,34 @@ class SpiralPositionalEncoding(nn.Module):
         spiral_coords = coords[spiral_idx]  # Rearrange in spiral order, shape: (height*width, 2)
 
         # Encode 2D coordinates into d_model dimensions using parallel operations
-        y = spiral_coords[:, 0].float().unsqueeze(1)  # Shape: (seq_len, 1)
+        y = spiral_coords[:, 0].float().unsqueeze(1)  # Shape: (seq_len, 1), a.k.a. (height*width, 1)
         x = spiral_coords[:, 1].float().unsqueeze(1)  # Shape: (seq_len, 1)
 
+        number_of_positions = height * width
+        position = torch.arange(0, number_of_positions, dtype=torch.float).unsqueeze(1)
+
+        # # Calculate the div_terms for sine and cosine functions
+        # div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))  # Shape: (d_model/2,)
+
+        # # Compute positional encodings for each position in the spiral sequence
+        # pe[:, 0::2] = torch.sin(y * div_term)  # Shape: (seq_len, d_model/2)
+        # pe[:, 1::2] = torch.cos(x * div_term)  # Shape: (seq_len, d_model/2)
+
         # Calculate the div_terms for sine and cosine functions
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))  # Shape: (d_model/2,)
+        div_term = torch.exp(torch.arange(0, d_model, 4).float() * (-math.log(10000.0) / d_model))  # Shape: (d_model/4,)
 
         # Compute positional encodings for each position in the spiral sequence
-        pe[:, 0::2] = torch.sin(y * div_term)  # Shape: (seq_len, d_model/2)
-        pe[:, 1::2] = torch.cos(x * div_term)  # Shape: (seq_len, d_model/2)
+        pe[:, 0::4] = torch.sin(y * div_term)  # Shape: (seq_len, d_model/4)
+        pe[:, 1::4] = torch.cos(y * div_term)  # Shape: (seq_len, d_model/4)
+        pe[:, 2::4] = torch.sin(x * div_term)  # Shape: (seq_len, d_model/4)
+        pe[:, 3::4] = torch.cos(x * div_term)  # Shape: (seq_len, d_model/4)
+
+        # pe[:, 0::2] = torch.sin(position * div_term)  # Shape: (seq_len, d_model/2)
+        # pe[:, 1::2] = torch.cos(position * div_term)
 
         self.register_buffer('pe', pe.unsqueeze(1))  # Shape: (seq_len, 1, d_model)
+
+        # self.positional_encoding = nn.Embedding(height * width, d_model) # learnable positional encodings
 
     def forward(self, x):
         r"""Add spiral positional encodings to the input embeddings.
@@ -153,6 +171,7 @@ class SpiralPositionalEncoding(nn.Module):
             >>> output = pos_encoder(x)
         """
 
+        # x = x + self.positional_encoding(torch.arange(x.size(0)).to(x.device)).unsqueeze(1)
         x = x + self.pe[:x.size(0), :]
         return self.dropout(x)
     
@@ -240,7 +259,7 @@ class TransformerModel(nn.Transformer):
     Container module with an encoder, a recurrent or transformer module, and a decoder.
     Args:
         ntoken: Number of tokens in the vocabulary.
-        ninp: Number of expected features in the input.
+        ninp: Number of expected features in the input, a.k.a. embedding dimension.
         nhead: Number of heads in the multiheadattention models.
         nhid: Dimension of the feedforward network model.
         nlayers: Number of recurrent layers.
@@ -275,7 +294,7 @@ class TransformerModel(nn.Transformer):
             src (Tensor): The input sequence tensor of shape [sequence length, batch size].
             has_mask (bool): Indicates whether to apply a source mask. Default is True.
         Returns:
-            Tensor: Log probabilities of the output tokens.
+            Tensor: Log probabilities of the output tokens, shape [sequence length, batch size, ntoken].
         """
         if has_mask:
             device = src.device
@@ -288,6 +307,6 @@ class TransformerModel(nn.Transformer):
         src = self.input_emb(src) * math.sqrt(self.ninp) # Shape: (seq_len, batch, embed_dim)
         # src = src.repeat(height)
         src = self.pos_encoder(src) # Add positional encoding to the input embeddings
-        output = self.encoder(src, mask=self.src_mask)
+        output = self.encoder(src, mask=self.src_mask) # Shape: (seq_len, batch, embed_dim)
         output = self.decoder(output)
         return F.log_softmax(output, dim=-1)

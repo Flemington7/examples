@@ -15,7 +15,7 @@ parser.add_argument('--data', type=str, default='./data/wikitext-2',
                     help='location of the data corpus')
 parser.add_argument('--height', type=int, default=20,
                     help='height of the 2D grid')
-parser.add_argument('--width', type=int, default=4,
+parser.add_argument('--width', type=int, default=20,
                     help='width of the 2D grid')
 parser.add_argument('--checkpoint', type=str, default='./model.pt',
                     help='model checkpoint to use')
@@ -65,8 +65,9 @@ ntokens = len(corpus.dictionary)
 is_transformer_model = hasattr(model, 'model_type') and model.model_type == 'Transformer'
 if not is_transformer_model:
     hidden = model.init_hidden(1)
-input = torch.randint(ntokens, (1, 1), dtype=torch.long).to(device) # Shape: (1, 1)
-# # input = torch.LongTensor([[97]]).to(device)
+# input = torch.randint(ntokens, (1, 1), dtype=torch.long).to(device) # Shape: (1, 1) Randomly initialize the <start> token
+input = torch.zeros(1, 1, dtype=torch.long).to(device)  # Shape: (1, 1)
+# input = torch.LongTensor([[97]]).to(device)
 # input = torch.randint(ntokens, (16, 1), dtype=torch.long).to(device)
 # import os
 # if os.path.exists(args.outf):
@@ -74,7 +75,7 @@ input = torch.randint(ntokens, (1, 1), dtype=torch.long).to(device) # Shape: (1,
 
 word_indices = []
 with torch.no_grad():  # no tracking history
-    for i in range(args.words):
+    for i in range(args.height * args.width):
         if is_transformer_model:
             output = model(input, False)
             word_weights = output[-1].squeeze().div(args.temperature).exp().cpu()
@@ -94,7 +95,7 @@ with torch.no_grad():  # no tracking history
         # outf.write(word + ('\n' if i % 20 == 19 else ' '))
 
         if i % args.log_interval == 0:
-            print('| Generated {}/{} words'.format(i, args.words))
+            print('| Generated {}/{} words'.format(i, args.height * args.width))
 
 # Convert the list of word indices to a tensor
 word_indices_tensor = torch.tensor(word_indices, dtype=torch.long)

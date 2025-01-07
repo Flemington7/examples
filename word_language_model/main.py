@@ -172,7 +172,7 @@ def get_batch(source, i):
         data: the input token
         target: the target token
     """
-    seq_len = min(args.bptt, len(source) - 1 - i)
+    seq_len = min(args.bptt, len(source) - 1 - i) # The sequence length is the minimum of the bptt limit and the remaining tokens
     data = source[i:i+seq_len] # Shape: seq_len, batch_size
     target = source[i+1:i+1+seq_len].view(-1)
     return data, target
@@ -207,6 +207,9 @@ def train():
     if args.model != 'Transformer':
         hidden = model.init_hidden(args.batch_size)
     for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
+        # e.g., if args.bptt = 35, then we will process 35 tokens at a time
+        # batch will be 0, 1, 2, ..., len(train_data) // args.bptt
+        # i will be 0, 35, 70, ... 
         data, targets = get_batch(train_data, i)
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.

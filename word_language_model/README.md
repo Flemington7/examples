@@ -9,7 +9,7 @@ python main.py --cuda --epochs 6 --tied    # Train a tied LSTM on Wikitext-2 wit
 python main.py --cuda --tied               # Train a tied LSTM on Wikitext-2 with CUDA for 40 epochs.
 python main.py --cuda --epochs 6 --model Transformer --lr 5
                                            # Train a Transformer model on Wikitext-2 with CUDA.
-python main.py --data ./data/grid --cuda --epochs 64 --model Transformer --lr 0.01 --batch_size 1
+python main.py --data ./data/grid --cuda --epochs 128 --model Transformer --lr 0.01 --batch_size 1
                                            # Train a Transformer model on Grid dataset with CUDA. 
 
 python generate.py --cuda                  # Generate samples from the default model checkpoint with CUDA.
