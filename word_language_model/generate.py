@@ -66,7 +66,9 @@ is_transformer_model = hasattr(model, 'model_type') and model.model_type == 'Tra
 if not is_transformer_model:
     hidden = model.init_hidden(1)
 # input = torch.randint(ntokens, (1, 1), dtype=torch.long).to(device) # Shape: (1, 1) Randomly initialize the <start> token
-input = torch.zeros(1, 1, dtype=torch.long).to(device)  # Shape: (1, 1)
+# input = torch.zeros(1, 1, dtype=torch.long).to(device)  # Shape: (1, 1)
+input = corpus.train[:100].unsqueeze(1).to(device)  # Shape: (200, 1)
+input_copy = input.clone()
 # input = torch.LongTensor([[97]]).to(device)
 # input = torch.randint(ntokens, (16, 1), dtype=torch.long).to(device)
 # import os
@@ -75,7 +77,7 @@ input = torch.zeros(1, 1, dtype=torch.long).to(device)  # Shape: (1, 1)
 
 word_indices = []
 with torch.no_grad():  # no tracking history
-    for i in range(args.height * args.width):
+    for i in range(args.height * args.width-100):
         if is_transformer_model:
             output = model(input, False)
             word_weights = output[-1].squeeze().div(args.temperature).exp().cpu()
@@ -98,13 +100,16 @@ with torch.no_grad():  # no tracking history
             print('| Generated {}/{} words'.format(i, args.height * args.width))
 
 # Convert the list of word indices to a tensor
-word_indices_tensor = torch.tensor(word_indices, dtype=torch.long)
+word_indices_tensor = torch.tensor(word_indices, dtype=torch.long).to(device)  # Shape: (height * width)
+
+# Concatenate the original input with the generated words
+word_indices_tensor = torch.cat([input_copy.squeeze(), word_indices_tensor], 0)
 
 # Get the spiral indices
 spiral_indices = data.spiral_indices(args.height, args.width)
 
 # Create an empty tensor to hold the grid
-grid = torch.zeros(args.height * args.width, dtype=torch.long)
+grid = torch.zeros(args.height * args.width, dtype=torch.long).to(device)
 
 # Assign the word indices to the grid
 grid[spiral_indices] = word_indices_tensor  # Shape: (height * width)

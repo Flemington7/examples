@@ -147,18 +147,30 @@ class SpiralPositionalEncoding(nn.Module):
         # div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))  # Shape: (d_model/2,)
 
         # # Compute positional encodings for each position in the spiral sequence
+        # # This implementation does not coherence with the original paper, 
+        # # "We chose this function because we hypothesized it would allow the model to easily learn to attend by relative positions, since for any fixed offset k, PE(pos+k) can be represented as a linear function of PE(pos)
         # pe[:, 0::2] = torch.sin(y * div_term)  # Shape: (seq_len, d_model/2)
         # pe[:, 1::2] = torch.cos(x * div_term)  # Shape: (seq_len, d_model/2)
 
         # Method 2.2:
+        # # Calculate the div_terms for sine and cosine functions
+        # div_term = torch.exp(torch.arange(0, d_model, 4).float() * (-math.log(10000.0) / d_model))  # Shape: (d_model/4,)
+
+        # # Compute positional encodings for each position in the spiral sequence
+        # # This implementation coherence with the original paper
+        # pe[:, 0::4] = torch.sin(y * div_term)  # Shape: (seq_len, d_model/4)
+        # pe[:, 1::4] = torch.cos(y * div_term)  # Shape: (seq_len, d_model/4)
+        # pe[:, 2::4] = torch.sin(x * div_term)  # Shape: (seq_len, d_model/4)
+        # pe[:, 3::4] = torch.cos(x * div_term)  # Shape: (seq_len, d_model/4)
+
+        # Method 2.3:
         # Calculate the div_terms for sine and cosine functions
-        div_term = torch.exp(torch.arange(0, d_model, 4).float() * (-math.log(10000.0) / d_model))  # Shape: (d_model/4,)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))  # Shape: (d_model/2,)
 
         # Compute positional encodings for each position in the spiral sequence
-        pe[:, 0::4] = torch.sin(y * div_term)  # Shape: (seq_len, d_model/4)
-        pe[:, 1::4] = torch.cos(y * div_term)  # Shape: (seq_len, d_model/4)
-        pe[:, 2::4] = torch.sin(x * div_term)  # Shape: (seq_len, d_model/4)
-        pe[:, 3::4] = torch.cos(x * div_term)  # Shape: (seq_len, d_model/4)
+        # This implementation coherence with the original paper
+        pe[:, 0::2] = torch.sin(y * div_term) + torch.sin(x * div_term)  # Shape: (seq_len, d_model/2)
+        pe[:, 1::2] = torch.cos(y * div_term) + torch.cos(x * div_term)  # Shape: (seq_len, d_model/2)
 
         self.register_buffer('pe', pe.unsqueeze(1))  # Shape: (seq_len, 1, d_model)
 
@@ -314,5 +326,5 @@ class TransformerModel(nn.Transformer):
         # src = src.repeat(height)
         src = self.pos_encoder(src) # Add positional encoding to the input embeddings
         output = self.encoder(src, mask=self.src_mask) # Shape: (seq_len, batch, embed_dim)
-        output = self.decoder(output)
+        output = self.decoder(output) # Shape: (seq_len, batch, ntoken)
         return F.log_softmax(output, dim=-1)

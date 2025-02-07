@@ -170,7 +170,7 @@ def get_batch(source, i):
         i: the index of the token to be processed
     Returns:
         data: the input token
-        target: the target token
+        target: the target token, shape: (seq_len * batch_size)
     """
     seq_len = min(args.bptt, len(source) - 1 - i) # The sequence length is the minimum of the bptt limit and the remaining tokens
     data = source[i:i+seq_len] # Shape: seq_len, batch_size
@@ -215,12 +215,12 @@ def train():
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
         model.zero_grad()
         if args.model == 'Transformer':
-            output = model(data)
-            output = output.view(-1, ntokens)
+            output = model(data) # Shape: (seq_len, batch_size, ntokens)
+            output = output.view(-1, ntokens) # Shape: (seq_len * batch_size, ntokens)
         else:
             hidden = repackage_hidden(hidden)
             output, hidden = model(data, hidden)
-        loss = criterion(output, targets) # Compute the loss using the next token
+        loss = criterion(output, targets) # Compute the loss using the next token, shape: (seq_len * batch_size)
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
